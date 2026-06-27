@@ -77,6 +77,7 @@ const css = readFileSync(join('dist/assets', cssName), 'utf8');
 const doc = body => `<!doctype html><html lang="en"><head>
 <base href="${origin}" />
 <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
 <style>${css}</style></head><body>${body}</body></html>`;
 
 // 3. Screenshot each screen at a phone-ish width (the primary on-site device).
@@ -89,9 +90,17 @@ await page.setViewport({width: 480, height: 900, deviceScaleFactor: 2});
 
 const outDir = '/tmp';
 for (const s of screens) {
+  await page.setViewport({
+    width: s.width || 480,
+    height: 900,
+    deviceScaleFactor: 2,
+  });
   await page.setContent(doc(s.html), {waitUntil: 'domcontentloaded'});
   // Wait for every <img> to finish loading/decoding so assets aren't blank.
   await page.evaluate(async () => {
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready.catch(() => {});
+    }
     await Promise.all(
       [...document.images].map(img =>
         img.complete ? null : img.decode().catch(() => {})

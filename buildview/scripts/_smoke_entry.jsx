@@ -19,6 +19,7 @@ import {
 } from '../src/domain/entities.js';
 import {getMembershipsForProject} from '../src/domain/queries.js';
 
+import Landing from '../src/screens/Landing.jsx';
 import Login from '../src/screens/Login.jsx';
 import ForemanProjectList from '../src/screens/ForemanProjectList.jsx';
 import ForemanProjectView from '../src/screens/ForemanProjectView.jsx';
@@ -58,7 +59,8 @@ const fNav = navFor(foreman);
 const wNav = navFor(worker);
 
 const cases = [
-  ['Login', <Login onLogin={() => {}} />],
+  ['Landing', <Landing onSignIn={() => {}} onLaunchDemo={() => {}} />],
+  ['Login', <Login onLogin={() => {}} onBack={() => {}} />],
   ['ForemanProjectList', <ForemanProjectList nav={fNav} />],
   ['ForemanProjectView', <ForemanProjectView nav={fNav} params={{projectId: project.id}} />],
   ['ForemanRoomView', <ForemanRoomView nav={fNav} params={{roomId: room.id}} />],

@@ -20,7 +20,7 @@ import {
 
 // Screen 1: Login / pick user (prototype only, no passwords).
 // Pick an existing user, or create one (name, role, trade).
-export default function Login({onLogin}) {
+export default function Login({onLogin, onBack}) {
   useDbVersion();
   const users = db.users.list();
 
@@ -41,15 +41,30 @@ export default function Login({onLogin}) {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-100">
-      <header className="border-b-4 border-brand bg-steel py-6 text-center text-white">
-        <span className="text-3xl font-black tracking-tight">
-          BUILD<span className="text-brand">VIEW</span>
-        </span>
-        <p className="mt-1 text-sm text-zinc-300">Construction site tracker</p>
-      </header>
+    <div className="relative min-h-screen overflow-hidden bg-ink text-white">
+      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <div className="absolute -top-40 -left-32 size-[34rem] rounded-full bg-brand/20 blur-3xl animate-float-slow" />
+        <div className="absolute -bottom-40 -right-24 size-[30rem] rounded-full bg-electric/20 blur-3xl animate-float" />
+      </div>
 
-      <main className="mx-auto max-w-md space-y-5 px-4 py-6">
+      <div className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4 py-10">
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="mb-6 self-start text-sm font-semibold text-white/70 transition hover:text-white">
+            ← Back to home
+          </button>
+        )}
+        <div className="animate-fade-up text-center">
+          <span className="font-display text-4xl font-bold tracking-tight">
+            BUILD<span className="text-brand">VIEW</span>
+          </span>
+          <p className="mt-2 text-sm text-white/60">
+            Sign in, create an account, or load the demo site.
+          </p>
+        </div>
+
+        <div className="animate-fade-up delay-1 mt-6 space-y-5 rounded-3xl border border-white/10 bg-white p-5 text-zinc-900 shadow-[var(--shadow-lift)]">
         <section>
           <SectionTitle>Demo</SectionTitle>
           <Card className="space-y-3 p-4">
@@ -144,7 +159,8 @@ export default function Login({onLogin}) {
             </form>
           </Card>
         </section>
-      </main>
+        </div>
+      </div>
     </div>
   );
 }

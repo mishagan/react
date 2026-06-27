@@ -15,6 +15,7 @@ import {
   getTasks,
 } from '../src/domain/queries.js';
 
+import Landing from '../src/screens/Landing.jsx';
 import Login from '../src/screens/Login.jsx';
 import ForemanProjectList from '../src/screens/ForemanProjectList.jsx';
 import ForemanProjectView from '../src/screens/ForemanProjectView.jsx';
@@ -73,7 +74,8 @@ const Shell = ({who, children}) => (
 );
 
 const defs = [
-  ['01-login', 'Login + demo loader', <Login onLogin={() => {}} />, null],
+  ['00-landing', 'Landing / cover page', <Landing onSignIn={() => {}} onLaunchDemo={() => {}} />, null, 1200],
+  ['01-login', 'Login + demo loader', <Login onLogin={() => {}} onBack={() => {}} />, null],
   ['02-foreman-project-list', 'Foreman — Project list', <ForemanProjectList nav={fNav} />, foreman],
   ['03-foreman-control', 'Foreman — Site control', <ForemanControl nav={fNav} params={{projectId}} />, foreman],
   ['04-floor-plan', 'Plan-first floor view', <FloorPlan nav={fNav} params={{floorId: floor.id}} />, foreman],
@@ -87,8 +89,9 @@ const defs = [
   ['12-task-detail-foreman', 'Task detail (foreman)', <TaskDetail nav={fNav} params={{taskId: kitchenTask.id}} />, foreman],
 ];
 
-globalThis.__SCREENS = defs.map(([slug, label, el, who]) => ({
+globalThis.__SCREENS = defs.map(([slug, label, el, who, width]) => ({
   slug,
   label,
+  width,
   html: renderToString(who ? <Shell who={who}>{el}</Shell> : el),
 }));

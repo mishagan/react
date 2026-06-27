@@ -2,6 +2,8 @@ import React, {useState} from 'react';
 import {useSession} from './lib/session.js';
 import {ROLES} from './domain/constants.js';
 import {Button, Card, Avatar} from './components/ui.jsx';
+import {loadDemoData} from './demo/seed.js';
+import Landing from './screens/Landing.jsx';
 import Login from './screens/Login.jsx';
 import ForemanProjectList from './screens/ForemanProjectList.jsx';
 import ForemanProjectView from './screens/ForemanProjectView.jsx';
@@ -26,7 +28,7 @@ export default function App() {
   const [stack, setStack] = useState([{screen: 'home', params: {}}]);
 
   if (!user) {
-    return <Login onLogin={login} />;
+    return <PreAuth onLogin={login} />;
   }
 
   const current = stack[stack.length - 1];
@@ -54,7 +56,7 @@ export default function App() {
                 ← Back
               </Button>
             )}
-            <span className="text-lg font-black tracking-tight">
+            <span className="font-display text-lg font-bold tracking-tight">
               BUILD<span className="text-brand">VIEW</span>
             </span>
           </div>
@@ -84,6 +86,24 @@ export default function App() {
         BuildView · construction site tracker
       </footer>
     </div>
+  );
+}
+
+// Pre-auth: the animated landing/cover page, then sign-in. "Launch demo" seeds
+// a realistic site and drops straight in as the foreman.
+function PreAuth({onLogin}) {
+  const [view, setView] = useState('landing');
+  if (view === 'login') {
+    return <Login onLogin={onLogin} onBack={() => setView('landing')} />;
+  }
+  return (
+    <Landing
+      onSignIn={() => setView('login')}
+      onLaunchDemo={() => {
+        const {foremanId} = loadDemoData();
+        onLogin(foremanId);
+      }}
+    />
   );
 }
 
