@@ -1,4 +1,5 @@
 import React from 'react';
+import {asset} from '../lib/assets.js';
 
 // -----------------------------------------------------------------------------
 // Landing / cover page — shown before sign-in. An animated, modern marketing
@@ -278,9 +279,9 @@ function Features() {
 /* ---------------------------------------------------------------- personas */
 function Personas({onLaunchDemo}) {
   const people = [
-    ['Foreman', 'Control the build', 'Assign work, approve access, clear blockers and watch progress climb.', '/demo-assets/floor-plans/demo-apartment.svg', 'object-contain bg-white'],
-    ['Worker', 'Just the next job', 'Open the app, see your task, do it, snap a photo, mark it done.', '/demo-assets/site-photos/workers-on-site-mekis.jpg', 'object-cover'],
-    ['Investor', 'Total transparency', 'A live report proves the site is on track — no site visit required.', '/demo-assets/site-photos/construction-site-ahsmann.jpg', 'object-cover'],
+    ['Foreman', 'Control the build', 'Assign work, approve access, clear blockers and watch progress climb.', asset('demo-assets/floor-plans/demo-apartment.svg'), 'object-contain bg-white'],
+    ['Worker', 'Just the next job', 'Open the app, see your task, do it, snap a photo, mark it done.', asset('demo-assets/site-photos/workers-on-site-mekis.jpg'), 'object-cover'],
+    ['Investor', 'Total transparency', 'A live report proves the site is on track — no site visit required.', asset('demo-assets/site-photos/construction-site-ahsmann.jpg'), 'object-cover'],
   ];
   return (
     <section id="teams" className="mx-auto max-w-6xl px-5 py-20">

@@ -5,6 +5,7 @@ import {getRooms, getTasks} from '../domain/queries.js';
 import {getRoomStatus} from '../domain/status.js';
 import {ROOM_STATUS, ROOM_STATUS_LABEL} from '../domain/constants.js';
 import PlanMap from '../components/PlanMap.jsx';
+import {asset} from '../lib/assets.js';
 import {Card, PageTitle, SectionTitle} from '../components/ui.jsx';
 
 // Feature 2: Plan-first floor view. An interactive schematic plan generated
@@ -48,8 +49,8 @@ export default function FloorPlan({nav, params}) {
       <SectionTitle>Reference drawings</SectionTitle>
       <div className="grid grid-cols-2 gap-3">
         {[
-          ['/demo-assets/drawings/habs-residence-floorplan.jpg', 'Measured drawing (HABS)'],
-          ['/demo-assets/floor-plans/sample-floorplan.jpg', 'Sample floor plan'],
+          [asset('demo-assets/drawings/habs-residence-floorplan.jpg'), 'Measured drawing (HABS)'],
+          [asset('demo-assets/floor-plans/sample-floorplan.jpg'), 'Sample floor plan'],
         ].map(([src, label]) => (
           <Card key={src} className="overflow-hidden">
             <img src={src} alt={label} className="aspect-video w-full bg-white object-contain" />

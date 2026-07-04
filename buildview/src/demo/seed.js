@@ -9,6 +9,7 @@
 // Returns the demo foreman + a worker id so the caller can auto-log-in.
 // -----------------------------------------------------------------------------
 import {db} from '../data/db.js';
+import {asset} from '../lib/assets.js';
 import {ROLES, TRADES, TASK_STATUS} from '../domain/constants.js';
 import {
   createUser,
@@ -27,11 +28,12 @@ import {
 
 // Real, clearly-licensed demo assets (served from buildview/public/demo-assets,
 // credited in ASSETS_CREDITS.md). Stored as image URLs in imageData, which the
-// screens render directly as <img src>.
+// screens render directly as <img src>. asset() keeps them correct when the
+// app is hosted under a subpath (e.g. GitHub Pages).
 const ASSET = {
-  workers: '/demo-assets/site-photos/workers-on-site-mekis.jpg',
-  site: '/demo-assets/site-photos/construction-site-ahsmann.jpg',
-  defect: '/demo-assets/issue-photos/sample-defect.svg',
+  workers: asset('demo-assets/site-photos/workers-on-site-mekis.jpg'),
+  site: asset('demo-assets/site-photos/construction-site-ahsmann.jpg'),
+  defect: asset('demo-assets/issue-photos/sample-defect.svg'),
 };
 
 export function loadDemoData() {
