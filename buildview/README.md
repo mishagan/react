@@ -66,10 +66,18 @@ they hold no logic and touch no data.
 
 ## Status
 
-Logic phase complete (build order steps 1–9): all 5 flows run end to end and
-survive reloads; permission rule holds; dashboard numbers match the data.
-Design phase complete: industrial theme applied across all screens, plus an
-accessibility/polish pass. Logic and the data seam were untouched by styling.
+- **Logic phase** complete: all 5 flows run end to end and survive reloads;
+  permission rule holds; dashboard numbers match the data.
+- **Demo phase** complete: one-click demo seed, derived room status, worker
+  job card, foreman site control, read-only project report — covered by the
+  automated checks.
+- **Assets** integrated: curated public-domain/CC demo files (plans, drawings,
+  site photos) served from `/demo-assets` with full attribution.
+- **Design phase** complete: animated landing/cover page before sign-in,
+  display+body type system, CSS motion system, interactive status-tinted plan
+  map (clickable rooms), analytics dashboard (stat tiles, status distribution
+  bar, per-room progress), live project cards. Logic and the data seam were
+  untouched by styling.
 
 ## Scope boundaries (deferred, per spec §6)
 

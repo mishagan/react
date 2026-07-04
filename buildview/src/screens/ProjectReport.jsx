@@ -6,8 +6,17 @@ import {
   getBlockedRooms,
   getOpenIssuesForProject,
   getRecentPhotos,
+  getRoomsWithStatus,
 } from '../domain/status.js';
+import {ROOM_STATUS, ROOM_STATUS_LABEL} from '../domain/constants.js';
 import {Card, PageTitle, SectionTitle} from '../components/ui.jsx';
+
+const ROOM_STATUS_STYLE = {
+  [ROOM_STATUS.TODO]: 'bg-zinc-100 text-zinc-700',
+  [ROOM_STATUS.IN_PROGRESS]: 'bg-blue-50 text-progress',
+  [ROOM_STATUS.BLOCKED]: 'bg-red-50 text-hazard',
+  [ROOM_STATUS.DONE]: 'bg-green-50 text-go',
+};
 
 // Feature 5: Project Report / Investor View — read-only transparency snapshot.
 export default function ProjectReport({params}) {
@@ -21,6 +30,7 @@ export default function ProjectReport({params}) {
   const blocked = getBlockedRooms(project.id);
   const openIssues = getOpenIssuesForProject(project.id);
   const photos = getRecentPhotos(project.id, 6);
+  const rooms = getRoomsWithStatus(project.id);
 
   const summary = buildSummary(progress, blocked.length, openIssues.length);
 
@@ -62,6 +72,22 @@ export default function ProjectReport({params}) {
           <Stat label="To do" value={progress.todo} accent="text-zinc-700" />
         </div>
       </section>
+
+      {/* Per-room status at a glance */}
+      {rooms.length > 0 && (
+        <section>
+          <SectionTitle count={rooms.length}>Rooms</SectionTitle>
+          <div className="flex flex-wrap gap-2">
+            {rooms.map(({room, status}) => (
+              <span
+                key={room.id}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold ${ROOM_STATUS_STYLE[status]}`}>
+                {room.name} · {ROOM_STATUS_LABEL[status]}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Risk: blocked rooms + open issues */}
       <section>
