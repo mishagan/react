@@ -1,5 +1,6 @@
 import React, {useState} from 'react';
 import {useSession} from './lib/session.js';
+import {useSyncStatus} from './lib/useSync.js';
 import {ROLES} from './domain/constants.js';
 import {Button, Card, Avatar} from './components/ui.jsx';
 import {loadDemoData} from './demo/seed.js';
@@ -24,8 +25,21 @@ import TaskDetail from './screens/TaskDetail.jsx';
 // placeholder that proves login/logout and role routing work.
 // -----------------------------------------------------------------------------
 export default function App() {
-  const {user, login, logout} = useSession();
+  const {user, booting, login, logout} = useSession();
   const [stack, setStack] = useState([{screen: 'home', params: {}}]);
+
+  if (booting) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-ink text-white">
+        <div className="animate-fade-in text-center">
+          <span className="font-display text-3xl font-bold tracking-tight">
+            BUILD<span className="text-brand">VIEW</span>
+          </span>
+          <p className="mt-3 text-sm text-white/50">Connecting to your site…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) {
     return <PreAuth onLogin={login} />;
@@ -61,6 +75,7 @@ export default function App() {
             </span>
           </div>
           <div className="ml-auto flex items-center gap-3">
+            <SyncIndicator />
             <span className="hidden text-right text-sm leading-tight sm:block">
               <span className="font-semibold">{user.name}</span>
               <br />
@@ -86,6 +101,28 @@ export default function App() {
         BuildView · construction site tracker
       </footer>
     </div>
+  );
+}
+
+// Live sync state in the chrome (remote mode only): green = synced, amber =
+// offline writes queued, blue = syncing. Hidden entirely in sandbox mode.
+const SYNC_DOT = {
+  live: ['bg-go', 'Synced'],
+  queued: ['bg-brand animate-blink', 'Offline — will sync'],
+  syncing: ['bg-progress animate-blink', 'Syncing…'],
+};
+
+function SyncIndicator() {
+  const status = useSyncStatus();
+  const entry = SYNC_DOT[status];
+  if (!entry) return null;
+  return (
+    <span
+      className="flex items-center gap-1.5 rounded-full border border-white/20 px-2.5 py-1 text-[11px] font-semibold text-zinc-200"
+      title={entry[1]}>
+      <span className={`size-2 rounded-full ${entry[0]}`} />
+      <span className="hidden md:inline">{entry[1]}</span>
+    </span>
   );
 }
 

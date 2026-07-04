@@ -20,9 +20,16 @@ npm run shots    # build + capture real-browser screenshots to /tmp (puppeteer)
 
 - **`src/data/db.js`** — the single data-access module (the "storage seam").
   Every read and write goes through here. No component touches `localStorage`
-  directly. To move to a real database later, replace the `backend` object in
-  this file; nothing else changes. Writes are atomic: a failed persist rolls
-  the cache back and throws `StorageError`.
+  directly. Writes are atomic: a failed persist rolls the cache back and
+  throws `StorageError`.
+- **`src/data/sync.js` + `src/data/remote/supabaseRemote.js`** — the seam's
+  promised backend swap, delivered local-first: reads stay synchronous from
+  the cache, local writes queue durably (offline-safe) and push to Supabase,
+  remote changes stream back in via realtime with last-write-wins on
+  `updatedAt`. Configured via `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`
+  (see `supabase/SETUP.md`); without them the app runs in the classic local
+  sandbox mode. Real email/password accounts in remote mode; the demo always
+  stays a local sandbox and never touches shared data.
 - **`src/lib/useDb.js`** — `useDbVersion()` hook: subscribes a component to the
   store so it re-renders on writes. Components read data via `db.*` in render.
 - **`src/domain/`** — `constants.js` (enums), `entities.js` (typed creators +

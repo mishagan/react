@@ -45,10 +45,15 @@ function emptyState() {
 const STORAGE_KEY = 'buildview:v1';
 const SESSION_KEY = 'buildview:session:v1';
 
+// Namespace suffix separating independent stores: '' is the classic local /
+// demo-sandbox store; remote mode caches under ':remote' so sandbox demos and
+// real synced data never mix. Tests use namespaces to simulate two devices.
+let namespace = '';
+
 const backend = {
   loadSession() {
     try {
-      return localStorage.getItem(SESSION_KEY) || null;
+      return localStorage.getItem(SESSION_KEY + namespace) || null;
     } catch (err) {
       return null;
     }
@@ -56,8 +61,8 @@ const backend = {
 
   saveSession(userId) {
     try {
-      if (userId) localStorage.setItem(SESSION_KEY, userId);
-      else localStorage.removeItem(SESSION_KEY);
+      if (userId) localStorage.setItem(SESSION_KEY + namespace, userId);
+      else localStorage.removeItem(SESSION_KEY + namespace);
     } catch (err) {
       console.error('BuildView: failed to write session.', err);
     }
@@ -65,7 +70,7 @@ const backend = {
 
   load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(STORAGE_KEY + namespace);
       if (!raw) return emptyState();
       const parsed = JSON.parse(raw);
       // Make sure every known collection exists even if the stored blob is old.
@@ -79,7 +84,7 @@ const backend = {
 
   save(state) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY + namespace, JSON.stringify(state));
       return true;
     } catch (err) {
       // Most likely the localStorage quota (e.g. too many/large base64 photos).
@@ -103,6 +108,11 @@ export class StorageError extends Error {
 // Reads come from here so the UI is synchronous; writes persist immediately.
 // ---------------------------------------------------------------------------
 let state = backend.load();
+
+// Optional write mirror (the remote-sync engine). When attached, every locally
+// persisted create/update/remove is echoed to it. Inbound remote changes come
+// back through the __applyRemote* functions below and never re-mirror.
+let mirror = null;
 
 // Monotonic version, bumped on every successful write. React subscribers read
 // this as a stable snapshot (see lib/useDb.js) to know when to re-render,
@@ -178,13 +188,15 @@ function get(name, id) {
 
 function create(name, data) {
   assertCollection(name);
-  const row = {id: uid(), createdAt: now(), ...data};
+  const stamp = now();
+  const row = {id: uid(), createdAt: stamp, updatedAt: stamp, ...data};
   const prev = state[name];
   state[name] = [...prev, row];
   if (!persist()) {
     state[name] = prev; // keep cache consistent with storage
     throw new StorageError('Could not save — local storage may be full.');
   }
+  if (mirror) mirror.upsert(name, clone(row));
   return clone(row);
 }
 
@@ -194,8 +206,8 @@ function update(name, id, patch) {
   let updated = null;
   state[name] = prev.map(r => {
     if (r.id !== id) return r;
-    // Never let callers overwrite id/createdAt.
-    updated = {...r, ...patch, id: r.id, createdAt: r.createdAt};
+    // Never let callers overwrite id/createdAt; stamp updatedAt for sync LWW.
+    updated = {...r, ...patch, id: r.id, createdAt: r.createdAt, updatedAt: now()};
     return updated;
   });
   if (!updated) {
@@ -206,6 +218,7 @@ function update(name, id, patch) {
     state[name] = prev;
     throw new StorageError('Could not save — local storage may be full.');
   }
+  if (mirror) mirror.upsert(name, clone(updated));
   return clone(updated);
 }
 
@@ -219,6 +232,7 @@ function remove(name, id) {
     state[name] = before;
     throw new StorageError('Could not save — local storage may be full.');
   }
+  if (mirror) mirror.remove(name, id);
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +308,55 @@ export const db = {
     state = backend.load();
     version += 1;
     notify();
+  },
+
+  // -------------------------------------------------------------------------
+  // Remote-sync integration (used only by data/sync.js and tests; screens
+  // never call these). Inbound remote changes bypass the mirror so a device's
+  // own echoes and stale rows cannot loop or clobber newer local edits.
+  // -------------------------------------------------------------------------
+  __setMirror(m) {
+    mirror = m;
+  },
+
+  // Switch to an isolated store (e.g. ':remote') and reload the cache from it.
+  __setNamespace(ns) {
+    namespace = ns || '';
+    state = backend.load();
+    version += 1;
+    notify();
+  },
+
+  // Upsert a row coming FROM the remote. Last-write-wins on updatedAt; returns
+  // true if the row was applied, false if the local copy was same-or-newer.
+  __applyRemote(name, row) {
+    assertCollection(name);
+    if (!row || !row.id) return false;
+    const existing = state[name].find(r => r.id === row.id);
+    if (existing && (existing.updatedAt || '') >= (row.updatedAt || '')) {
+      return false;
+    }
+    state[name] = existing
+      ? state[name].map(r => (r.id === row.id ? {...row} : r))
+      : [...state[name], {...row}];
+    persist(); // cache write failure is non-fatal here; remote stays truth
+    return true;
+  },
+
+  __applyRemoteDelete(name, id) {
+    assertCollection(name);
+    const before = state[name];
+    state[name] = before.filter(r => r.id !== id);
+    if (state[name].length !== before.length) persist();
+  },
+
+  // Replace all collections with a full remote snapshot (initial pull).
+  __hydrate(snapshot) {
+    state = {...emptyState()};
+    for (const name of COLLECTIONS) {
+      if (Array.isArray(snapshot[name])) state[name] = snapshot[name].map(r => ({...r}));
+    }
+    persist();
   },
 };
 

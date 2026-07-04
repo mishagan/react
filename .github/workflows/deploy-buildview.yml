@@ -47,6 +47,10 @@ jobs:
         working-directory: buildview
         env:
           BASE_PATH: /${{ github.event.repository.name }}/
+          # Optional real backend (see buildview/supabase/SETUP.md). Empty →
+          # the site runs in local sandbox mode, exactly as before.
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

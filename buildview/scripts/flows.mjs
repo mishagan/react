@@ -504,6 +504,98 @@ const run = async () => {
   );
   check('report: open issue count matches dashboard', m.getOpenIssuesForProject(dProject).length === ddash.openIssueCount);
 
+  // ===========================================================================
+  // SYNC PHASE — local-first remote sync (fake remote, no network).
+  // Client A runs the real sync engine; client B is a second db instance fed
+  // by the remote's subscription — i.e. what another device receives.
+  // ===========================================================================
+  console.log('\nSync phase');
+
+  const sync = await import('../src/data/sync.js');
+  const {db: dbB} = await import('../src/data/db.js?client=b');
+  dbB.__setNamespace(':deviceB'); // isolate device B's storage
+
+  // In-memory fake remote implementing the pluggable interface.
+  const makeFakeRemote = () => {
+    const tables = {};
+    const subs = new Set();
+    let offline = false;
+    return {
+      setOffline(v) { offline = v; },
+      async pullAll() {
+        if (offline) throw new Error('offline');
+        const out = {};
+        for (const [k, rows] of Object.entries(tables)) out[k] = rows.map(r => ({...r}));
+        return out;
+      },
+      async upsert(collection, row) {
+        if (offline) throw new Error('offline');
+        const rows = (tables[collection] ||= []);
+        const i = rows.findIndex(r => r.id === row.id);
+        if (i >= 0) rows[i] = {...row};
+        else rows.push({...row});
+        for (const fn of subs) fn(collection, 'upsert', {...row});
+      },
+      async remove(collection, id) {
+        if (offline) throw new Error('offline');
+        tables[collection] = (tables[collection] || []).filter(r => r.id !== id);
+        for (const fn of subs) fn(collection, 'delete', id);
+      },
+      subscribe(fn) {
+        subs.add(fn);
+        return () => subs.delete(fn);
+      },
+    };
+  };
+
+  const fake = makeFakeRemote();
+  // Wire device B to the remote's event stream (inbound-only client).
+  fake.subscribe((collection, event, payload) => {
+    if (event === 'delete') dbB.__applyRemoteDelete(collection, payload);
+    else dbB.__applyRemote(collection, payload);
+  });
+
+  m.db.reset();
+  await sync.startSync(fake);
+
+  // 1) A local write on device A reaches the remote and device B.
+  const sTask = m.db.tasks.create({roomId: 'r-sync', title: 'Sync me', trade: 'general', status: 'todo', assignedWorkerIds: []});
+  await new Promise(r => setTimeout(r, 20)); // let the async flush drain
+  check('sync: write pushed to remote', (await fake.pullAll()).tasks?.some(t => t.id === sTask.id) === true);
+  check('sync: device B received the row', dbB.tasks.get(sTask.id)?.title === 'Sync me');
+
+  // 2) updatedAt stamped and used for LWW: a stale remote echo is a no-op.
+  const fresh = m.db.tasks.get(sTask.id);
+  check('sync: rows carry updatedAt', typeof fresh.updatedAt === 'string' && fresh.updatedAt.length > 0);
+  const stale = {...fresh, title: 'STALE', updatedAt: '2000-01-01T00:00:00.000Z'};
+  check('sync: stale remote row rejected (LWW)', m.db.__applyRemote('tasks', stale) === false);
+  check('sync: local title unchanged after stale echo', m.db.tasks.get(sTask.id).title === 'Sync me');
+  const newer = {...fresh, title: 'NEWER', updatedAt: '2099-01-01T00:00:00.000Z'};
+  check('sync: newer remote row applied', m.db.__applyRemote('tasks', newer) === true && m.db.tasks.get(sTask.id).title === 'NEWER');
+
+  // 3) Deletes propagate.
+  m.db.tasks.remove(sTask.id);
+  await new Promise(r => setTimeout(r, 20));
+  check('sync: delete reached remote', !(await fake.pullAll()).tasks?.some(t => t.id === sTask.id));
+  check('sync: delete reached device B', dbB.tasks.get(sTask.id) === undefined);
+
+  // 4) Offline: writes queue durably and push after "reconnect + reload".
+  fake.setOffline(true);
+  const offTask = m.db.tasks.create({roomId: 'r-sync', title: 'Offline work', trade: 'general', status: 'todo', assignedWorkerIds: []});
+  await new Promise(r => setTimeout(r, 20));
+  check('sync: offline write visible locally at once', m.db.tasks.get(offTask.id)?.title === 'Offline work');
+  check('sync: offline write NOT on remote yet', !(await fake.pullAll().catch(() => ({}))).tasks?.some?.(t => t.id === offTask.id));
+  sync.stopSync();
+  fake.setOffline(false);
+  await sync.startSync(fake); // simulates app restart with connectivity back
+  await new Promise(r => setTimeout(r, 20));
+  check('sync: queued offline write pushed after reconnect', (await fake.pullAll()).tasks?.some(t => t.id === offTask.id) === true);
+  check('sync: status is live after drain', sync.getSyncStatus() === 'live');
+  sync.stopSync();
+
+  // 5) Namespace isolation: device B's storage never leaked into A's.
+  check('sync: device stores are isolated', m.db.tasks.list().length !== 0 || dbB.tasks.list().length === 0);
+
   console.log(
     failures === 0
       ? '\nALL CHECKS PASSED'

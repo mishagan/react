@@ -4,6 +4,11 @@ import {useDbVersion} from '../lib/useDb.js';
 import {createUser} from '../domain/entities.js';
 import {loadDemoData} from '../demo/seed.js';
 import {
+  isRemoteConfigured,
+  remoteSignIn,
+  remoteSignUp,
+} from '../lib/remoteSession.js';
+import {
   ROLES,
   ROLE_LIST,
   TRADES,
@@ -17,6 +22,127 @@ import {
   TextInput,
   Select,
 } from '../components/ui.jsx';
+
+// Real team account (remote mode): Supabase email/password sign-in + sign-up.
+// Profile fields are captured at sign-up and become the users row on first
+// successful session. Shown only when a remote is configured at build time.
+function RemoteAuth({onLogin}) {
+  const [tab, setTab] = useState('signin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [role, setRole] = useState(ROLES.FOREMAN);
+  const [trade, setTrade] = useState(WORKER_TRADES[0]);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+
+  async function submit(e) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      if (tab === 'signin') {
+        const userId = await remoteSignIn(email, password);
+        onLogin(userId);
+      } else {
+        const profile = {
+          name: name.trim() || email.split('@')[0],
+          role,
+          trade: role === ROLES.FOREMAN ? TRADES.NONE : trade,
+        };
+        const res = await remoteSignUp(email, password, profile);
+        if (res.pendingConfirmation) {
+          setMessage('Check your email to confirm the account, then sign in.');
+          setTab('signin');
+        } else {
+          onLogin(res.userId);
+        }
+      }
+    } catch (err) {
+      setMessage(err?.message || 'Something went wrong. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const tabCls = active =>
+    `flex-1 rounded-md px-3 py-2 text-sm font-bold transition ${
+      active ? 'bg-steel text-white' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+    }`;
+
+  return (
+    <section>
+      <SectionTitle>Team account</SectionTitle>
+      <Card className="p-4">
+        <div className="mb-4 flex gap-2">
+          <button type="button" className={tabCls(tab === 'signin')} onClick={() => setTab('signin')}>
+            Sign in
+          </button>
+          <button type="button" className={tabCls(tab === 'signup')} onClick={() => setTab('signup')}>
+            Create account
+          </button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          <Field label="Email">
+            <TextInput
+              type="email"
+              required
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@company.com"
+              autoComplete="email"
+            />
+          </Field>
+          <Field label="Password">
+            <TextInput
+              type="password"
+              required
+              minLength={6}
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+              autoComplete={tab === 'signin' ? 'current-password' : 'new-password'}
+            />
+          </Field>
+          {tab === 'signup' && (
+            <>
+              <Field label="Name">
+                <TextInput value={name} onChange={e => setName(e.target.value)} placeholder="Full name" />
+              </Field>
+              <Field label="Role">
+                <Select
+                  value={role}
+                  onChange={e => setRole(e.target.value)}>
+                  {ROLE_LIST.map(r => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {role === ROLES.WORKER && (
+                <Field label="Trade">
+                  <Select value={trade} onChange={e => setTrade(e.target.value)}>
+                    {WORKER_TRADES.map(t => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+            </>
+          )}
+          <Button type="submit" className="w-full" disabled={busy}>
+            {busy ? 'Working…' : tab === 'signin' ? 'Sign in' : 'Create account'}
+          </Button>
+          {message && <p className="text-sm font-medium text-steel">{message}</p>}
+        </form>
+      </Card>
+    </section>
+  );
+}
 
 // Screen 1: Login / pick user (prototype only, no passwords).
 // Pick an existing user, or create one (name, role, trade).
@@ -65,8 +191,9 @@ export default function Login({onLogin, onBack}) {
         </div>
 
         <div className="animate-fade-up delay-1 mt-6 space-y-5 rounded-3xl border border-white/10 bg-white p-5 text-zinc-900 shadow-[var(--shadow-lift)]">
+        {isRemoteConfigured() && <RemoteAuth onLogin={onLogin} />}
         <section>
-          <SectionTitle>Demo</SectionTitle>
+          <SectionTitle>{isRemoteConfigured() ? 'Local sandbox demo' : 'Demo'}</SectionTitle>
           <Card className="space-y-3 p-4">
             <p className="text-sm text-zinc-600">
               Load a ready-made demo site (foreman, workers, rooms, tasks,
