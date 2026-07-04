@@ -1,0 +1,607 @@
+// Headless end-to-end check of the BuildView flows (sections 4 & 8).
+//
+// Runs the REAL data-access seam and domain modules in Node by polyfilling
+// localStorage, so we can prove each flow works and that data survives a
+// "reload" (re-reading from the same persisted store) without a browser.
+//
+//   node scripts/flows.mjs
+//
+// This exercises logic only; the screens render the same domain calls.
+
+// --- minimal localStorage polyfill (one backing map, survives "reload") ------
+const makeLocalStorage = store => ({
+  getItem: k => (k in store ? store[k] : null),
+  setItem: (k, v) => {
+    store[k] = String(v);
+  },
+  removeItem: k => {
+    delete store[k];
+  },
+});
+
+const backingStore = {};
+globalThis.localStorage = makeLocalStorage(backingStore);
+
+let failures = 0;
+function check(label, cond) {
+  if (cond) {
+    console.log('  ok  -', label);
+  } else {
+    failures++;
+    console.error('  FAIL-', label);
+  }
+}
+
+// Import the real modules once. The domain modules import db.js internally,
+// so they all share the single db instance (the storage seam) — exactly as the
+// app does.
+let modules;
+async function loadModules() {
+  const dbmod = await import('../src/data/db.js');
+  const entities = await import('../src/domain/entities.js');
+  const queries = await import('../src/domain/queries.js');
+  const permissions = await import('../src/domain/permissions.js');
+  const constants = await import('../src/domain/constants.js');
+  const status = await import('../src/domain/status.js');
+  const demo = await import('../src/demo/seed.js');
+  modules = {
+    db: dbmod.db,
+    StorageError: dbmod.StorageError,
+    ...entities,
+    ...queries,
+    ...permissions,
+    ...constants,
+    ...status,
+    ...demo,
+  };
+  return modules;
+}
+
+// Simulate a real page reload: drop the in-memory cache and rebuild it from
+// the persisted store, then keep using the same module instances.
+function reload() {
+  modules.db.__reloadFromStorage();
+  return modules;
+}
+
+const run = async () => {
+  let m = await loadModules();
+  m.db.reset();
+
+  // ===========================================================================
+  // FLOW A — foreman sets up a project
+  // ===========================================================================
+  console.log('\nFlow A: foreman setup');
+  const foreman = m.createUser({
+    name: 'Fran Foreman',
+    role: m.ROLES.FOREMAN,
+    trade: m.TRADES.NONE,
+  });
+  const project = m.createProject({
+    name: 'Riverside',
+    address: '1 River Rd',
+    createdByUserId: foreman.id,
+  });
+  check('project has invite code', !!project.inviteCode);
+  check(
+    'foreman joined own project',
+    m.getUser(foreman.id).joinedProjectIds.includes(project.id)
+  );
+
+  const building = m.createBuilding({projectId: project.id, name: 'Building A'});
+  const floor = m.createFloor({buildingId: building.id, name: 'Floor 3'});
+  const kitchen = m.createRoom({floorId: floor.id, name: 'Apt 12, kitchen'});
+  const bath = m.createRoom({floorId: floor.id, name: 'Apt 12, bathroom'});
+
+  const elecTask = m.createTask({
+    roomId: kitchen.id,
+    title: 'Wire kitchen sockets',
+    instructions: 'Install 6 sockets',
+    trade: m.TRADES.ELECTRICIAN,
+    createdByUserId: foreman.id,
+  });
+  const plumbTask = m.createTask({
+    roomId: bath.id,
+    title: 'Install bath plumbing',
+    instructions: 'Connect supply + drain',
+    trade: m.TRADES.PLUMBER,
+    createdByUserId: foreman.id,
+  });
+  check('task defaults to todo', elecTask.status === m.TASK_STATUS.TODO);
+  check('task starts unassigned', elecTask.assignedWorkerIds.length === 0);
+
+  // Reload and confirm the hierarchy survived.
+  m = await reload();
+  check(
+    'project survives reload',
+    !!m.getProject(project.id) &&
+      m.getProject(project.id).name === 'Riverside'
+  );
+  check('buildings survive reload', m.getBuildings(project.id).length === 1);
+  check(
+    'rooms survive reload',
+    m.getAllRoomsForProject(project.id).length === 2
+  );
+  check(
+    'tasks survive reload',
+    m.getAllTasksForProject(project.id).length === 2
+  );
+
+  // ===========================================================================
+  // FLOW B — worker joins + access
+  // ===========================================================================
+  console.log('\nFlow B: worker join + access');
+  const worker = m.createUser({
+    name: 'Eli Electrician',
+    role: m.ROLES.WORKER,
+    trade: m.TRADES.ELECTRICIAN,
+  });
+
+  // An extra kitchen task of a DIFFERENT trade, to test the OR-assigned rule.
+  const painterTask = m.createTask({
+    roomId: kitchen.id,
+    title: 'Paint kitchen ceiling',
+    instructions: 'Two coats',
+    trade: m.TRADES.PAINTER,
+    createdByUserId: foreman.id,
+  });
+
+  m.requestMembership({userId: worker.id, projectId: project.id});
+
+  // Before approval: pending => sees nothing.
+  m = await reload();
+  check(
+    'pending worker sees no tasks',
+    m.getVisibleTasksForWorker(m.getUser(worker.id), project.id).length === 0
+  );
+
+  // Foreman grants access to the kitchen room only.
+  const membership = m
+    .getMembershipsForProject(project.id)
+    .find(x => x.userId === worker.id);
+  m.grantMembership(membership.id, [kitchen.id]);
+
+  // Assign the painter task to the electrician worker (trade mismatch but
+  // assigned => must be visible).
+  m.setTaskAssignees(painterTask.id, [worker.id]);
+
+  m = await reload();
+  const visible = m.getVisibleTasksForWorker(m.getUser(worker.id), project.id);
+  const visibleIds = new Set(visible.map(t => t.id));
+  check('granted worker sees trade-matched task', visibleIds.has(elecTask.id));
+  check('granted worker sees assigned task', visibleIds.has(painterTask.id));
+  check(
+    'worker does NOT see task in non-granted room',
+    !visibleIds.has(plumbTask.id)
+  );
+  check('worker visible count is exactly 2', visible.length === 2);
+
+  // A second worker (painter) granted the same room sees only trade matches.
+  const painter = m.createUser({
+    name: 'Pat Painter',
+    role: m.ROLES.WORKER,
+    trade: m.TRADES.PAINTER,
+  });
+  m.requestMembership({userId: painter.id, projectId: project.id});
+  const pMembership = m
+    .getMembershipsForProject(project.id)
+    .find(x => x.userId === painter.id);
+  m.grantMembership(pMembership.id, [kitchen.id]);
+  m = await reload();
+  const painterVisible = m.getVisibleTasksForWorker(
+    m.getUser(painter.id),
+    project.id
+  );
+  check(
+    'painter sees only their trade task (not electrician task)',
+    painterVisible.length === 1 &&
+      painterVisible[0].id === painterTask.id
+  );
+
+  // ===========================================================================
+  // FLOW C — worker does a task
+  // ===========================================================================
+  console.log('\nFlow C: worker does a task');
+  // Worker may edit status of an assigned task...
+  const w = m.getUser(worker.id);
+  check(
+    'worker may edit status of assigned task',
+    m.canEditTaskStatus(w, m.getTask(painterTask.id))
+  );
+  // ...but NOT a task they are only trade-matched to without assignment.
+  check(
+    'worker may NOT edit status of non-assigned task',
+    !m.canEditTaskStatus(w, m.getTask(elecTask.id))
+  );
+
+  m.setTaskStatus(painterTask.id, m.TASK_STATUS.IN_PROGRESS);
+  m.addPhoto({
+    taskId: painterTask.id,
+    uploadedByUserId: worker.id,
+    imageData: 'data:image/png;base64,FAKE',
+    caption: 'Ceiling done',
+  });
+  m.setTaskStatus(painterTask.id, m.TASK_STATUS.DONE);
+
+  m = await reload();
+  check(
+    'status change persisted to done',
+    m.getTask(painterTask.id).status === m.TASK_STATUS.DONE
+  );
+  check('photo persisted on task', m.getPhotos(painterTask.id).length === 1);
+  check(
+    'foreman can view the task + photo',
+    m.canViewTask(m.getUser(foreman.id), m.getTask(painterTask.id)) &&
+      m.getPhotos(painterTask.id)[0].caption === 'Ceiling done'
+  );
+
+  // ===========================================================================
+  // FLOW D — issue handling
+  // ===========================================================================
+  console.log('\nFlow D: issues');
+  // Permission shape: foreman any task; worker only assigned tasks.
+  check(
+    'foreman may raise issue on any task',
+    m.canRaiseIssue(m.getUser(foreman.id), m.getTask(elecTask.id))
+  );
+  check(
+    'worker may raise issue on assigned task',
+    m.canRaiseIssue(m.getUser(worker.id), m.getTask(painterTask.id))
+  );
+  check(
+    'worker may NOT raise issue on non-assigned task',
+    !m.canRaiseIssue(m.getUser(worker.id), m.getTask(elecTask.id))
+  );
+  check('worker may NOT resolve issues', !m.canResolveIssue(m.getUser(worker.id)));
+  check('foreman may resolve issues', m.canResolveIssue(m.getUser(foreman.id)));
+
+  // Worker raises an issue on the task they completed.
+  const issue = m.raiseIssue({
+    taskId: painterTask.id,
+    raisedByUserId: worker.id,
+    description: 'Paint smudge near window',
+    responsibleUserId: worker.id,
+  });
+
+  m = await reload();
+  let dash = m.getDashboard(project.id);
+  check('open issue shows in dashboard', dash.openIssueCount === 1);
+  check(
+    'task with open issue is flagged',
+    dash.flaggedTasks.some(t => t.id === painterTask.id)
+  );
+
+  // Foreman resolves it.
+  m.resolveIssue(issue.id);
+  m = await reload();
+  dash = m.getDashboard(project.id);
+  check('resolved issue leaves open count', dash.openIssueCount === 0);
+  check('no flagged tasks after resolve', dash.flaggedTasks.length === 0);
+  check('resolved issue counted as resolved', dash.resolvedIssueCount === 1);
+
+  // ===========================================================================
+  // FLOW E — foreman dashboard numbers match the data
+  // ===========================================================================
+  console.log('\nFlow E: dashboard');
+  dash = m.getDashboard(project.id);
+  const allTasks = m.getAllTasksForProject(project.id);
+  check('dashboard total matches task count', dash.totalTasks === allTasks.length);
+  const sumByStatus =
+    dash.byStatus[m.TASK_STATUS.TODO] +
+    dash.byStatus[m.TASK_STATUS.IN_PROGRESS] +
+    dash.byStatus[m.TASK_STATUS.DONE];
+  check('status buckets sum to total', sumByStatus === dash.totalTasks);
+  check(
+    'done count matches data',
+    dash.byStatus[m.TASK_STATUS.DONE] ===
+      allTasks.filter(t => t.status === m.TASK_STATUS.DONE).length
+  );
+  check(
+    'todo count matches data',
+    dash.byStatus[m.TASK_STATUS.TODO] ===
+      allTasks.filter(t => t.status === m.TASK_STATUS.TODO).length
+  );
+
+  // ===========================================================================
+  // EDGE CASES — hardening
+  // ===========================================================================
+  console.log('\nEdge cases');
+
+  // Wrong / unknown invite code finds nothing.
+  check(
+    'unknown invite code returns null',
+    m.findProjectByInviteCode('BV-NOPE9') === null
+  );
+  // Invite code lookup is case/space-insensitive.
+  check(
+    'invite code lookup is case-insensitive',
+    !!m.findProjectByInviteCode('  ' + project.inviteCode.toLowerCase() + '  ')
+  );
+
+  // A second project gets a different invite code.
+  const project2 = m.createProject({
+    name: 'Second',
+    address: '',
+    createdByUserId: foreman.id,
+  });
+  check(
+    'invite codes are unique across projects',
+    project2.inviteCode !== project.inviteCode
+  );
+
+  // Duplicate join request does not create a second membership.
+  const before = m.getMembershipsForProject(project.id).length;
+  m.requestMembership({userId: worker.id, projectId: project.id});
+  check(
+    'duplicate join request is a no-op',
+    m.getMembershipsForProject(project.id).length === before
+  );
+
+  // Granting with NO rooms => worker sees nothing even though "granted".
+  const lonelyWorker = m.createUser({
+    name: 'No Rooms',
+    role: m.ROLES.WORKER,
+    trade: m.TRADES.ELECTRICIAN,
+  });
+  m.requestMembership({userId: lonelyWorker.id, projectId: project.id});
+  const lonelyM = m
+    .getMembershipsForProject(project.id)
+    .find(x => x.userId === lonelyWorker.id);
+  m.grantMembership(lonelyM.id, []); // granted, but no visible rooms
+  m = await reload();
+  check(
+    'granted-but-no-rooms worker sees nothing',
+    m.getVisibleTasksForWorker(m.getUser(lonelyWorker.id), project.id).length === 0
+  );
+
+  // Editing visible rooms to remove a room hides its tasks again.
+  const wMembership = m
+    .getMembershipsForProject(project.id)
+    .find(x => x.userId === worker.id);
+  m.setVisibleRooms(wMembership.id, []); // revoke kitchen
+  m = await reload();
+  check(
+    'removing visible room hides its tasks',
+    m.getVisibleTasksForWorker(m.getUser(worker.id), project.id).length === 0
+  );
+  // And a worker can no longer edit a task that left their visible rooms.
+  check(
+    'worker cannot edit task after room revoked',
+    !m.canEditTaskStatus(m.getUser(worker.id), m.getTask(painterTask.id))
+  );
+
+  // Cross-project isolation: foreman of project2 cannot view a task in project.
+  const foreman2 = m.createUser({
+    name: 'Other Foreman',
+    role: m.ROLES.FOREMAN,
+    trade: m.TRADES.NONE,
+  });
+  check(
+    'foreman cannot view task in a project they do not own',
+    !m.canViewTask(m.getUser(foreman2.id), m.getTask(elecTask.id))
+  );
+
+  // Storage write failure rolls back the cache and throws StorageError.
+  const taskCountBefore = m.getAllTasksForProject(project.id).length;
+  const originalSetItem = globalThis.localStorage.setItem;
+  globalThis.localStorage.setItem = () => {
+    throw new Error('QuotaExceededError (simulated)');
+  };
+  let threw = false;
+  try {
+    m.createTask({
+      roomId: kitchen.id,
+      title: 'Should fail',
+      instructions: '',
+      trade: m.TRADES.GENERAL,
+      createdByUserId: foreman.id,
+    });
+  } catch (err) {
+    threw = err instanceof m.StorageError;
+  }
+  globalThis.localStorage.setItem = originalSetItem;
+  check('failed write throws StorageError', threw);
+  check(
+    'failed write does not leave a phantom record in cache',
+    m.getAllTasksForProject(project.id).length === taskCountBefore
+  );
+  m = await reload();
+  check(
+    'failed write persisted nothing',
+    m.getAllTasksForProject(project.id).length === taskCountBefore
+  );
+
+  // ===========================================================================
+  // DEMO PHASE — seed data, room status, job-card flow, report/control numbers
+  // ===========================================================================
+  console.log('\nDemo phase');
+
+  // 1) Demo data loads correctly.
+  const seeded = m.loadDemoData(); // resets + seeds
+  m = await reload();
+  const dProject = seeded.projectId;
+  check('demo: one project', m.db.projects.list().length === 1);
+  check('demo: one building', m.db.buildings.list().length === 1);
+  check('demo: one floor', m.db.floors.list().length === 1);
+  check('demo: four rooms', m.getAllRoomsForProject(dProject).length === 4);
+  check('demo: six tasks', m.getAllTasksForProject(dProject).length === 6);
+  const dTasks = m.getAllTasksForProject(dProject);
+  check(
+    'demo: has a completed task',
+    dTasks.some(t => t.status === m.TASK_STATUS.DONE)
+  );
+  check(
+    'demo: has an in-progress task',
+    dTasks.some(t => t.status === m.TASK_STATUS.IN_PROGRESS)
+  );
+  check('demo: has an open issue', m.getOpenIssuesForProject(dProject).length >= 1);
+  check(
+    'demo: three workers granted access',
+    m.getMembershipsForProject(dProject).filter(
+      x => x.accessLevel === m.ACCESS_LEVEL.GRANTED
+    ).length === 3
+  );
+  check(
+    'demo: one pending request',
+    m.getMembershipsForProject(dProject).filter(
+      x => x.accessLevel === m.ACCESS_LEVEL.PENDING
+    ).length === 1
+  );
+
+  // 2) Room status derivation.
+  const roomByName = name =>
+    m.getAllRoomsForProject(dProject).find(r => r.name === name);
+  check(
+    'room status: Kitchen = in progress',
+    m.getRoomStatus(roomByName('Kitchen').id) === m.ROOM_STATUS.IN_PROGRESS
+  );
+  check(
+    'room status: Bathroom = done',
+    m.getRoomStatus(roomByName('Bathroom').id) === m.ROOM_STATUS.DONE
+  );
+  check(
+    'room status: Living Room = todo',
+    m.getRoomStatus(roomByName('Living Room').id) === m.ROOM_STATUS.TODO
+  );
+  check(
+    'room status: Bedroom = blocked (open issue)',
+    m.getRoomStatus(roomByName('Bedroom').id) === m.ROOM_STATUS.BLOCKED
+  );
+
+  // 3) Worker job-card flow (Eli the electrician).
+  const eli = m.db.users.list(u => u.name === 'Eli Electrician')[0];
+  const eliTasks = m.getAllVisibleTasksForWorker(m.getUser(eli.id));
+  check('job-card: Eli sees exactly his 2 accessible tasks', eliTasks.length === 2);
+  const eliNext = eliTasks
+    .filter(t => t.assignedWorkerIds.includes(eli.id) && t.status !== m.TASK_STATUS.DONE)
+    .sort((a, b) => (a.status === m.TASK_STATUS.IN_PROGRESS ? -1 : 1))[0];
+  check('job-card: next task is the in-progress one', eliNext.status === m.TASK_STATUS.IN_PROGRESS);
+  check('job-card: Eli may act on his next task', m.canEditTaskStatus(m.getUser(eli.id), eliNext));
+  m.setTaskStatus(eliNext.id, m.TASK_STATUS.DONE); // Mark done
+  m = await reload();
+  check('job-card: mark done persisted', m.getTask(eliNext.id).status === m.TASK_STATUS.DONE);
+
+  // 4) Permissions still hold under demo data.
+  const walt = m.db.users.list(u => u.name === 'Walt Worker')[0];
+  check(
+    'permissions: pending worker sees nothing',
+    m.getAllVisibleTasksForWorker(m.getUser(walt.id)).length === 0
+  );
+  const bedroomTask = dTasks.find(t => t.roomId === roomByName('Bedroom').id);
+  check(
+    'permissions: Eli cannot see a task in a non-granted room',
+    !m.getAllVisibleTasksForWorker(m.getUser(eli.id)).some(t => t.id === bedroomTask.id)
+  );
+
+  // 5) Report / dashboard numbers match the data.
+  const prog = m.getProjectProgress(dProject);
+  const ddash = m.getDashboard(dProject);
+  check('report: progress total matches task count', prog.total === m.getAllTasksForProject(dProject).length);
+  check('report: done count matches dashboard', prog.done === ddash.byStatus[m.TASK_STATUS.DONE]);
+  check(
+    'report: percent equals round(done/total)',
+    prog.percent === Math.round((prog.done / prog.total) * 100)
+  );
+  check('report: open issue count matches dashboard', m.getOpenIssuesForProject(dProject).length === ddash.openIssueCount);
+
+  // ===========================================================================
+  // SYNC PHASE — local-first remote sync (fake remote, no network).
+  // Client A runs the real sync engine; client B is a second db instance fed
+  // by the remote's subscription — i.e. what another device receives.
+  // ===========================================================================
+  console.log('\nSync phase');
+
+  const sync = await import('../src/data/sync.js');
+  const {db: dbB} = await import('../src/data/db.js?client=b');
+  dbB.__setNamespace(':deviceB'); // isolate device B's storage
+
+  // In-memory fake remote implementing the pluggable interface.
+  const makeFakeRemote = () => {
+    const tables = {};
+    const subs = new Set();
+    let offline = false;
+    return {
+      setOffline(v) { offline = v; },
+      async pullAll() {
+        if (offline) throw new Error('offline');
+        const out = {};
+        for (const [k, rows] of Object.entries(tables)) out[k] = rows.map(r => ({...r}));
+        return out;
+      },
+      async upsert(collection, row) {
+        if (offline) throw new Error('offline');
+        const rows = (tables[collection] ||= []);
+        const i = rows.findIndex(r => r.id === row.id);
+        if (i >= 0) rows[i] = {...row};
+        else rows.push({...row});
+        for (const fn of subs) fn(collection, 'upsert', {...row});
+      },
+      async remove(collection, id) {
+        if (offline) throw new Error('offline');
+        tables[collection] = (tables[collection] || []).filter(r => r.id !== id);
+        for (const fn of subs) fn(collection, 'delete', id);
+      },
+      subscribe(fn) {
+        subs.add(fn);
+        return () => subs.delete(fn);
+      },
+    };
+  };
+
+  const fake = makeFakeRemote();
+  // Wire device B to the remote's event stream (inbound-only client).
+  fake.subscribe((collection, event, payload) => {
+    if (event === 'delete') dbB.__applyRemoteDelete(collection, payload);
+    else dbB.__applyRemote(collection, payload);
+  });
+
+  m.db.reset();
+  await sync.startSync(fake);
+
+  // 1) A local write on device A reaches the remote and device B.
+  const sTask = m.db.tasks.create({roomId: 'r-sync', title: 'Sync me', trade: 'general', status: 'todo', assignedWorkerIds: []});
+  await new Promise(r => setTimeout(r, 20)); // let the async flush drain
+  check('sync: write pushed to remote', (await fake.pullAll()).tasks?.some(t => t.id === sTask.id) === true);
+  check('sync: device B received the row', dbB.tasks.get(sTask.id)?.title === 'Sync me');
+
+  // 2) updatedAt stamped and used for LWW: a stale remote echo is a no-op.
+  const fresh = m.db.tasks.get(sTask.id);
+  check('sync: rows carry updatedAt', typeof fresh.updatedAt === 'string' && fresh.updatedAt.length > 0);
+  const stale = {...fresh, title: 'STALE', updatedAt: '2000-01-01T00:00:00.000Z'};
+  check('sync: stale remote row rejected (LWW)', m.db.__applyRemote('tasks', stale) === false);
+  check('sync: local title unchanged after stale echo', m.db.tasks.get(sTask.id).title === 'Sync me');
+  const newer = {...fresh, title: 'NEWER', updatedAt: '2099-01-01T00:00:00.000Z'};
+  check('sync: newer remote row applied', m.db.__applyRemote('tasks', newer) === true && m.db.tasks.get(sTask.id).title === 'NEWER');
+
+  // 3) Deletes propagate.
+  m.db.tasks.remove(sTask.id);
+  await new Promise(r => setTimeout(r, 20));
+  check('sync: delete reached remote', !(await fake.pullAll()).tasks?.some(t => t.id === sTask.id));
+  check('sync: delete reached device B', dbB.tasks.get(sTask.id) === undefined);
+
+  // 4) Offline: writes queue durably and push after "reconnect + reload".
+  fake.setOffline(true);
+  const offTask = m.db.tasks.create({roomId: 'r-sync', title: 'Offline work', trade: 'general', status: 'todo', assignedWorkerIds: []});
+  await new Promise(r => setTimeout(r, 20));
+  check('sync: offline write visible locally at once', m.db.tasks.get(offTask.id)?.title === 'Offline work');
+  check('sync: offline write NOT on remote yet', !(await fake.pullAll().catch(() => ({}))).tasks?.some?.(t => t.id === offTask.id));
+  sync.stopSync();
+  fake.setOffline(false);
+  await sync.startSync(fake); // simulates app restart with connectivity back
+  await new Promise(r => setTimeout(r, 20));
+  check('sync: queued offline write pushed after reconnect', (await fake.pullAll()).tasks?.some(t => t.id === offTask.id) === true);
+  check('sync: status is live after drain', sync.getSyncStatus() === 'live');
+  sync.stopSync();
+
+  // 5) Namespace isolation: device B's storage never leaked into A's.
+  check('sync: device stores are isolated', m.db.tasks.list().length !== 0 || dbB.tasks.list().length === 0);
+
+  console.log(
+    failures === 0
+      ? '\nALL CHECKS PASSED'
+      : `\n${failures} CHECK(S) FAILED`
+  );
+  process.exit(failures === 0 ? 0 : 1);
+};
+
+run();

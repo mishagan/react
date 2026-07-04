@@ -1,0 +1,198 @@
+@import 'tailwindcss';
+
+/* -----------------------------------------------------------------------------
+   BuildView design system — modern "construction execution" direction.
+   Industrial roots (safety amber + dark steel) elevated with a display
+   typeface, gradients, soft shadows and a CSS-driven motion system.
+   Tokens in @theme generate matching utilities (bg-brand, text-steel, …).
+----------------------------------------------------------------------------- */
+@theme {
+  --color-brand: #f59e0b; /* safety amber */
+  --color-brand-dark: #b45309; /* pressed/hover */
+  --color-brand-fg: #1c1917; /* text on amber */
+  --color-steel: #1e293b; /* dark slate — chrome/header */
+  --color-steel-light: #334155;
+  --color-hazard: #dc2626; /* issues / danger */
+  --color-go: #16a34a; /* done / success */
+  --color-progress: #2563eb; /* in progress */
+
+  --color-ink: #0a0f1d; /* near-black navy — landing canvas */
+  --color-ink-2: #111a30;
+  --color-electric: #38bdf8; /* accent highlight */
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
+    Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', ui-sans-serif, system-ui,
+    sans-serif;
+
+  --shadow-glow: 0 0 0 1px rgba(245, 158, 11, 0.4),
+    0 10px 40px -10px rgba(245, 158, 11, 0.5);
+  --shadow-lift: 0 24px 60px -24px rgba(2, 6, 23, 0.45);
+}
+
+@layer base {
+  body {
+    @apply bg-zinc-100 text-zinc-900 antialiased;
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv05', 'cv11'; /* Inter: open digits/legible alt glyphs */
+  }
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+  button {
+    @apply cursor-pointer;
+  }
+  /* Respect users who prefer no motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Motion system. Entrance animations auto-play on mount (fill-mode forwards)
+   so content is reliably visible (screenshots, no-JS) while still animating.
+--------------------------------------------------------------------------- */
+@keyframes bv-fade-up {
+  from { opacity: 0; transform: translateY(28px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes bv-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes bv-scale-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes bv-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+@keyframes bv-float-slow {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-22px) rotate(2deg); }
+}
+@keyframes bv-gradient-pan {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes bv-pulse-ring {
+  0% { box-shadow: 0 0 0 0 currentColor; opacity: 0.9; }
+  70% { box-shadow: 0 0 0 14px transparent; opacity: 1; }
+  100% { box-shadow: 0 0 0 0 transparent; opacity: 0.9; }
+}
+@keyframes bv-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes bv-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes bv-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+@keyframes bv-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@keyframes bv-iso-sway {
+  0%, 100% { transform: rotateX(55deg) rotateZ(-41deg); }
+  50% { transform: rotateX(57deg) rotateZ(-44deg); }
+}
+@keyframes bv-plate-rise {
+  from { opacity: 0; transform: translateZ(-60px); }
+  to { opacity: 1; transform: translateZ(var(--z, 0)); }
+}
+@keyframes bv-scan {
+  0%, 100% { transform: translateY(0); opacity: 0; }
+  10%, 90% { opacity: 0.7; }
+  50% { transform: translateY(240px); }
+}
+@keyframes bv-reveal {
+  from { opacity: 0; transform: translateY(32px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@layer utilities {
+  .animate-fade-up { opacity: 0; animation: bv-fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+  .animate-fade-in { opacity: 0; animation: bv-fade-in 0.8s ease forwards; }
+  .animate-scale-in { opacity: 0; animation: bv-scale-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+  .animate-float { animation: bv-float 6s ease-in-out infinite; }
+  .animate-float-slow { animation: bv-float-slow 9s ease-in-out infinite; }
+  .animate-pulse-ring { animation: bv-pulse-ring 2.2s ease-out infinite; }
+  .animate-blink { animation: bv-blink 1.6s ease-in-out infinite; }
+  .animate-marquee { animation: bv-marquee 26s linear infinite; }
+
+  .animate-gradient {
+    background-size: 200% 200%;
+    animation: bv-gradient-pan 12s ease infinite;
+  }
+
+  /* Animated gradient text. */
+  .text-gradient {
+    background-image: linear-gradient(110deg, #f59e0b 10%, #fcd34d 40%, #38bdf8 90%);
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: bv-gradient-pan 8s ease infinite;
+  }
+
+  /* Frosted glass surface. */
+  .glass {
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  /* Stagger helpers — add alongside an entrance animation. */
+  .delay-1 { animation-delay: 0.08s; }
+  .delay-2 { animation-delay: 0.16s; }
+  .delay-3 { animation-delay: 0.24s; }
+  .delay-4 { animation-delay: 0.32s; }
+  .delay-5 { animation-delay: 0.40s; }
+  .delay-6 { animation-delay: 0.48s; }
+  .delay-7 { animation-delay: 0.56s; }
+
+  /* Scroll-reveal (IntersectionObserver adds .reveal-in after hydration;
+     SSR/no-JS render starts visible via the same animation, fill both). */
+  .reveal-pre { opacity: 0; }
+  .reveal-in { animation: bv-reveal 0.8s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+  /* 3D scene helpers for the hero. */
+  .persp { perspective: 1500px; }
+  .preserve-3d { transform-style: preserve-3d; }
+  .iso-sway { animation: bv-iso-sway 10s ease-in-out infinite; }
+  .plate-rise { animation: bv-plate-rise 1s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+  /* Fluid display sizes. */
+  .text-hero { font-size: clamp(2.6rem, 6.5vw, 4.4rem); line-height: 1.02; }
+  .text-display { font-size: clamp(1.9rem, 4vw, 2.75rem); line-height: 1.1; }
+
+  /* Fade the marquee edges. */
+  .mask-x {
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  }
+
+  /* Film-grain overlay for depth on the dark canvas. */
+  .noise::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}

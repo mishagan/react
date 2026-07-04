@@ -1,0 +1,184 @@
+import React, {useState} from 'react';
+import {useSession} from './lib/session.js';
+import {useSyncStatus} from './lib/useSync.js';
+import {ROLES} from './domain/constants.js';
+import {Button, Card, Avatar} from './components/ui.jsx';
+import {loadDemoData} from './demo/seed.js';
+import Landing from './screens/Landing.jsx';
+import Login from './screens/Login.jsx';
+import ForemanProjectList from './screens/ForemanProjectList.jsx';
+import ForemanProjectView from './screens/ForemanProjectView.jsx';
+import ForemanRoomView from './screens/ForemanRoomView.jsx';
+import ForemanPendingRequests from './screens/ForemanPendingRequests.jsx';
+import ForemanDashboard from './screens/ForemanDashboard.jsx';
+import ForemanControl from './screens/ForemanControl.jsx';
+import FloorPlan from './screens/FloorPlan.jsx';
+import ProjectReport from './screens/ProjectReport.jsx';
+import WorkerHome from './screens/WorkerHome.jsx';
+import TaskDetail from './screens/TaskDetail.jsx';
+
+// -----------------------------------------------------------------------------
+// App shell + dumb stack navigation (a back button + plain screen switching,
+// per the spec). No router library. `nav` is passed to every screen.
+//
+// Screens get added in steps 4–8. For step 3 the "home" screen is a minimal
+// placeholder that proves login/logout and role routing work.
+// -----------------------------------------------------------------------------
+export default function App() {
+  const {user, booting, login, logout} = useSession();
+  const [stack, setStack] = useState([{screen: 'home', params: {}}]);
+
+  if (booting) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-ink text-white">
+        <div className="animate-fade-in text-center">
+          <span className="font-display text-3xl font-bold tracking-tight">
+            BUILD<span className="text-brand">VIEW</span>
+          </span>
+          <p className="mt-3 text-sm text-white/50">Connecting to your site…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <PreAuth onLogin={login} />;
+  }
+
+  const current = stack[stack.length - 1];
+  const nav = {
+    user,
+    go: (screen, params = {}) => setStack(s => [...s, {screen, params}]),
+    back: () => setStack(s => (s.length > 1 ? s.slice(0, -1) : s)),
+    reset: (screen = 'home', params = {}) => setStack([{screen, params}]),
+    logout: () => {
+      setStack([{screen: 'home', params: {}}]);
+      logout();
+    },
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-100">
+      <header className="sticky top-0 z-10 border-b-4 border-brand bg-steel text-white">
+        <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3">
+          <div className="flex items-center gap-2">
+            {stack.length > 1 && (
+              <Button
+                variant="ghost"
+                className="text-white hover:bg-steel-light"
+                onClick={nav.back}>
+                ← Back
+              </Button>
+            )}
+            <span className="font-display text-lg font-bold tracking-tight">
+              BUILD<span className="text-brand">VIEW</span>
+            </span>
+          </div>
+          <div className="ml-auto flex items-center gap-3">
+            <SyncIndicator />
+            <span className="hidden text-right text-sm leading-tight sm:block">
+              <span className="font-semibold">{user.name}</span>
+              <br />
+              <span className="text-zinc-300">
+                {user.role}
+                {user.role === ROLES.WORKER ? ` · ${user.trade}` : ''}
+              </span>
+            </span>
+            <Avatar name={user.name} />
+            <Button
+              variant="ghost"
+              className="text-white hover:bg-steel-light"
+              onClick={nav.logout}>
+              Log out
+            </Button>
+          </div>
+        </div>
+      </header>
+      <main className="mx-auto max-w-3xl px-4 py-5">
+        <Screen current={current} nav={nav} />
+      </main>
+      <footer className="mx-auto max-w-3xl px-4 py-6 text-center text-xs text-zinc-400">
+        BuildView · construction site tracker
+      </footer>
+    </div>
+  );
+}
+
+// Live sync state in the chrome (remote mode only): green = synced, amber =
+// offline writes queued, blue = syncing. Hidden entirely in sandbox mode.
+const SYNC_DOT = {
+  live: ['bg-go', 'Synced'],
+  queued: ['bg-brand animate-blink', 'Offline — will sync'],
+  syncing: ['bg-progress animate-blink', 'Syncing…'],
+};
+
+function SyncIndicator() {
+  const status = useSyncStatus();
+  const entry = SYNC_DOT[status];
+  if (!entry) return null;
+  return (
+    <span
+      className="flex items-center gap-1.5 rounded-full border border-white/20 px-2.5 py-1 text-[11px] font-semibold text-zinc-200"
+      title={entry[1]}>
+      <span className={`size-2 rounded-full ${entry[0]}`} />
+      <span className="hidden md:inline">{entry[1]}</span>
+    </span>
+  );
+}
+
+// Pre-auth: the animated landing/cover page, then sign-in. "Launch demo" seeds
+// a realistic site and drops straight in as the foreman.
+function PreAuth({onLogin}) {
+  const [view, setView] = useState('landing');
+  if (view === 'login') {
+    return <Login onLogin={onLogin} onBack={() => setView('landing')} />;
+  }
+  return (
+    <Landing
+      onSignIn={() => setView('login')}
+      onLaunchDemo={() => {
+        const {foremanId} = loadDemoData();
+        onLogin(foremanId);
+      }}
+    />
+  );
+}
+
+function Screen({current, nav}) {
+  const {user} = nav;
+  const {screen, params} = current;
+
+  // Home depends on role.
+  if (screen === 'home') {
+    if (user.role === ROLES.FOREMAN) {
+      return <ForemanProjectList nav={nav} />;
+    }
+    return <WorkerHome nav={nav} />;
+  }
+
+  // Foreman screens
+  if (screen === 'project') return <ForemanProjectView nav={nav} params={params} />;
+  if (screen === 'room') return <ForemanRoomView nav={nav} params={params} />;
+  if (screen === 'requests')
+    return <ForemanPendingRequests nav={nav} params={params} />;
+  if (screen === 'dashboard')
+    return <ForemanDashboard nav={nav} params={params} />;
+  if (screen === 'control')
+    return <ForemanControl nav={nav} params={params} />;
+  if (screen === 'floor') return <FloorPlan nav={nav} params={params} />;
+  if (screen === 'report') return <ProjectReport nav={nav} params={params} />;
+
+  // Shared
+  if (screen === 'task') return <TaskDetail nav={nav} params={params} />;
+
+  return (
+    <Card className="p-6 text-center">
+      <p className="text-zinc-600">Unknown screen: {screen}</p>
+      <div className="mt-3">
+        <Button variant="secondary" onClick={() => nav.reset()}>
+          Back to home
+        </Button>
+      </div>
+    </Card>
+  );
+}

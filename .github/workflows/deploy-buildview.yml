@@ -1,0 +1,67 @@
+# Deploy the BuildView demo (buildview/) to GitHub Pages.
+# Scoped to the BuildView development branch only — none of the upstream React
+# workflows are affected. Requires repo Settings → Pages → Source = "GitHub Actions".
+name: Deploy BuildView to Pages
+
+on:
+  push:
+    branches: [claude/lucid-newton-npdvws]
+    paths: ['buildview/**', '.github/workflows/deploy-buildview.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-buildview
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Tries to enable Pages; creating the site needs repo-admin, which the
+      # workflow token may lack — in that case enable it once by hand
+      # (Settings → Pages → Source: GitHub Actions) and this step passes
+      # from then on.
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+        continue-on-error: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: buildview
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm ci || npm install
+      - name: Logic checks + render smoke
+        working-directory: buildview
+        run: npm run check
+      - name: Build (subpath = /<repo>/)
+        working-directory: buildview
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}/
+          # Optional real backend (see buildview/supabase/SETUP.md). Empty →
+          # the site runs in local sandbox mode, exactly as before.
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+        run: npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: buildview/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
