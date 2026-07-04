@@ -1,11 +1,14 @@
-import React from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {asset} from '../lib/assets.js';
 
 // -----------------------------------------------------------------------------
-// Landing / cover page — shown before sign-in. An animated, modern marketing
-// page that explains BuildView, then funnels into Launch demo / Sign in.
-// Presentational only; all motion is CSS (auto-playing entrances), so it is
-// robust without JS and renders correctly in static screenshots.
+// Landing / cover page — shown before sign-in. Animated, modern marketing page:
+// a CSS-3D isometric "site hologram" hero with mouse parallax, scroll-reveal
+// sections, a tilted product-screenshot gallery, and the sign-in/demo funnel.
+//
+// Motion is CSS-first: SSR/no-JS renders fully visible (screenshot-safe);
+// IntersectionObserver and the parallax tilt are hydration-only enhancements.
+// prefers-reduced-motion is respected globally (index.css) and per-effect.
 // -----------------------------------------------------------------------------
 export default function Landing({onSignIn, onLaunchDemo}) {
   return (
@@ -13,13 +16,64 @@ export default function Landing({onSignIn, onLaunchDemo}) {
       <Nav onSignIn={onSignIn} onLaunchDemo={onLaunchDemo} />
       <Hero onSignIn={onSignIn} onLaunchDemo={onLaunchDemo} />
       <Marquee />
+      <Stats />
       <Pipeline />
+      <Screens />
       <Features />
       <Personas onLaunchDemo={onLaunchDemo} />
       <CTA onSignIn={onSignIn} onLaunchDemo={onLaunchDemo} />
       <Footer />
     </div>
   );
+}
+
+/* ----------------------------------------------------------- motion helpers */
+// Scroll reveal: visible by default (SSR/no-JS/above-fold); below-fold content
+// is hidden after hydration and animates in when it enters the viewport.
+function Reveal({children, className = '', delay = 0}) {
+  const ref = useRef(null);
+  const [phase, setPhase] = useState('static');
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (el.getBoundingClientRect().top < window.innerHeight * 0.9) return;
+    setPhase('pre');
+    const io = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting) {
+          setPhase('anim');
+          io.disconnect();
+        }
+      },
+      {threshold: 0.12}
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <div
+      ref={ref}
+      className={`${phase === 'pre' ? 'reveal-pre' : phase === 'anim' ? 'reveal-in' : ''} ${className}`}
+      style={phase === 'anim' && delay ? {animationDelay: `${delay}ms`} : undefined}>
+      {children}
+    </div>
+  );
+}
+
+// Pointer parallax for the 3D hero (no-op before hydration / reduced motion).
+function useTilt(max = 7) {
+  const [tilt, setTilt] = useState({x: 0, y: 0});
+  const onMouseMove = e => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    setTilt({
+      x: ((e.clientX - r.left) / r.width - 0.5) * 2 * max,
+      y: ((e.clientY - r.top) / r.height - 0.5) * -2 * max,
+    });
+  };
+  const onMouseLeave = () => setTilt({x: 0, y: 0});
+  return {tilt, onMouseMove, onMouseLeave};
 }
 
 /* ------------------------------------------------------------------ buttons */
@@ -55,6 +109,7 @@ function Nav({onSignIn, onLaunchDemo}) {
         <Logo />
         <nav className="ml-6 hidden gap-6 text-sm text-white/70 md:flex">
           <a href="#how" className="transition hover:text-white">How it works</a>
+          <a href="#screens" className="transition hover:text-white">Product</a>
           <a href="#features" className="transition hover:text-white">Features</a>
           <a href="#teams" className="transition hover:text-white">For teams</a>
         </nav>
@@ -69,30 +124,33 @@ function Nav({onSignIn, onLaunchDemo}) {
 
 /* --------------------------------------------------------------------- hero */
 function Hero({onSignIn, onLaunchDemo}) {
+  const {tilt, onMouseMove, onMouseLeave} = useTilt(7);
   return (
-    <section className="relative">
+    <section
+      className="noise relative"
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}>
       <Backdrop />
-      <div className="mx-auto grid max-w-6xl items-center gap-12 px-5 py-16 md:grid-cols-2 md:py-24">
+      <div className="mx-auto grid max-w-6xl items-center gap-14 px-5 py-16 md:grid-cols-2 md:py-24">
         <div>
           <span className="animate-fade-up inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold tracking-wide text-white/80">
             <span className="size-2 rounded-full bg-go animate-blink" />
             Construction execution platform
           </span>
-          <h1 className="animate-fade-up delay-1 mt-5 font-display text-4xl leading-[1.05] font-bold tracking-tight sm:text-6xl">
+          <h1 className="animate-fade-up delay-1 text-hero mt-5 font-display font-bold">
             Run the whole site
             <br />
             from <span className="text-gradient">one screen.</span>
           </h1>
-          <p className="animate-fade-up delay-2 mt-5 max-w-md text-lg text-white/70">
-            BuildView turns plans into action: project → building → floor → room →
-            task → photo → issue → dashboard. Every trade, every status, live.
+          <p className="animate-fade-up delay-2 mt-5 max-w-md text-lg leading-relaxed text-white/70">
+            BuildView turns plans into action: project → building → floor →
+            room → task → photo → issue → dashboard. Every trade, every
+            status, live.
           </p>
           <div className="animate-fade-up delay-3 mt-8 flex flex-wrap gap-3">
             <Accent onClick={onLaunchDemo}>
               Launch live demo
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <Arrow />
             </Accent>
             <Ghost onClick={onSignIn}>Sign in / Register</Ghost>
           </div>
@@ -103,9 +161,7 @@ function Hero({onSignIn, onLaunchDemo}) {
           </div>
         </div>
 
-        <div className="animate-scale-in delay-2">
-          <HeroVisual />
-        </div>
+        <SiteHologram tilt={tilt} />
       </div>
     </section>
   );
@@ -129,57 +185,66 @@ function Backdrop() {
   );
 }
 
-// Animated product mock: a live floor plan with pulsing room statuses,
-// progress bar and floating notification chips — the "explainer" visual.
-function HeroVisual() {
-  const rooms = [
-    ['Kitchen', 'In progress', 'bg-progress', 'text-progress'],
-    ['Bathroom', 'Done', 'bg-go', 'text-go'],
-    ['Living', 'To do', 'bg-white/15', 'text-white/40'],
-    ['Bedroom', 'Blocked', 'bg-hazard', 'text-hazard'],
-  ];
+// The 3D hero: an isometric stack of floor plates ("the building"), the top
+// floor showing live room statuses. Parallax-tilts with the pointer.
+const PLATE_ROOMS = [
+  ['rgba(37,99,235,0.75)', 'rgba(22,163,74,0.75)', 'rgba(255,255,255,0.14)', 'rgba(220,38,38,0.75)'],
+  ['rgba(255,255,255,0.10)', 'rgba(37,99,235,0.45)', 'rgba(255,255,255,0.10)', 'rgba(255,255,255,0.10)'],
+  ['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.08)', 'rgba(22,163,74,0.35)', 'rgba(255,255,255,0.08)'],
+];
+
+function SiteHologram({tilt}) {
   return (
-    <div className="relative">
-      <div className="glass rounded-3xl p-5 shadow-[var(--shadow-lift)]">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs text-white/50">Tower A · Floor 3</div>
-            <div className="font-display text-lg font-bold">Site control</div>
+    <div className="animate-scale-in delay-2 relative mx-auto w-full max-w-md">
+      <div className="persp">
+        <div
+          className="transition-transform duration-300 ease-out will-change-transform"
+          style={{transform: `rotateY(${tilt.x}deg) rotateX(${tilt.y}deg)`}}>
+          <div className="preserve-3d iso-sway relative mx-auto aspect-square w-72 sm:w-80">
+            {/* glow under the stack */}
+            <div className="absolute inset-6 rounded-3xl bg-brand/25 blur-3xl" />
+            {PLATE_ROOMS.map((rooms, i) => {
+              const z = (PLATE_ROOMS.length - 1 - i) * 64;
+              return (
+                <div
+                  key={i}
+                  className="plate-rise absolute inset-0 rounded-2xl border border-white/25 bg-ink-2/70 p-3 shadow-2xl backdrop-blur"
+                  style={{
+                    '--z': `${z}px`,
+                    animationDelay: `${0.25 + (PLATE_ROOMS.length - 1 - i) * 0.18}s`,
+                  }}>
+                  <div className="grid h-full grid-cols-2 grid-rows-2 gap-2">
+                    {rooms.map((c, j) => (
+                      <div
+                        key={j}
+                        className="rounded-lg border border-white/15"
+                        style={{backgroundColor: c}}
+                      />
+                    ))}
+                  </div>
+                  {i === 0 && (
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-brand px-3 py-1 text-[11px] font-bold whitespace-nowrap text-brand-fg shadow-lg">
+                      Floor 3 · live
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <div className="rounded-lg bg-brand px-3 py-1 text-sm font-bold text-brand-fg">33%</div>
-        </div>
-
-        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white/10">
-          <div className="h-full w-1/3 rounded-full bg-go animate-fade-in" />
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          {rooms.map(([name, status, bg, text], i) => (
-            <div
-              key={name}
-              className={`animate-fade-up delay-${i + 2} rounded-2xl border border-white/10 bg-white/5 p-3`}>
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold">{name}</span>
-                <span className={`${text} size-2.5 rounded-full ${bg} animate-pulse-ring`} />
-              </div>
-              <div className="mt-2 text-[11px] font-semibold tracking-wide text-white/50 uppercase">
-                {status}
-              </div>
-            </div>
-          ))}
         </div>
       </div>
 
-      {/* floating notification chips */}
-      <Chip className="-top-4 -left-3 animate-float" color="bg-hazard">⚠ Issue raised · Bedroom</Chip>
-      <Chip className="-bottom-4 right-2 animate-float-slow" color="bg-go">✓ Task done · Bathroom</Chip>
-      <Chip className="top-1/2 -right-5 animate-float" color="bg-progress">📷 Photo uploaded</Chip>
+      {/* floating notification chips (outside the 3D transform) */}
+      <Chip className="-top-2 -left-2 animate-float" color="bg-hazard">⚠ Issue raised · Bedroom</Chip>
+      <Chip className="-bottom-3 right-0 animate-float-slow" color="bg-go">✓ Task done · Bathroom</Chip>
+      <Chip className="top-1/2 -right-3 animate-float" color="bg-progress">📷 Photo uploaded</Chip>
     </div>
   );
 }
+
 function Chip({children, className = '', color}) {
   return (
-    <div className={`absolute ${className} flex items-center gap-2 rounded-full border border-white/15 bg-ink-2/90 px-3 py-1.5 text-xs font-semibold shadow-lg backdrop-blur`}>
+    <div className={`absolute z-10 ${className} flex items-center gap-2 rounded-full border border-white/15 bg-ink-2/90 px-3 py-1.5 text-xs font-semibold shadow-lg backdrop-blur`}>
       <span className={`size-2 rounded-full ${color}`} />
       {children}
     </div>
@@ -191,8 +256,8 @@ function Marquee() {
   const items = ['Electrician', 'Plumber', 'Painter', 'Tiler', 'Drywall', 'HVAC', 'General', 'Foreman'];
   const row = [...items, ...items];
   return (
-    <div className="border-y border-white/10 bg-white/[0.02] py-4">
-      <div className="flex w-max animate-marquee gap-3 whitespace-nowrap">
+    <div className="mask-x border-y border-white/10 bg-white/[0.02] py-4">
+      <div className="flex w-max animate-marquee gap-3 whitespace-nowrap hover:[animation-play-state:paused]">
         {row.map((t, i) => (
           <span key={i} className="rounded-full border border-white/10 px-4 py-1.5 text-sm text-white/60">
             {t}
@@ -200,6 +265,32 @@ function Marquee() {
         ))}
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------- stats */
+function Stats() {
+  const stats = [
+    ['5', 'guided site flows'],
+    ['57', 'automated checks'],
+    ['4', 'live room statuses'],
+    ['1', 'click to full demo'],
+  ];
+  return (
+    <section className="mx-auto max-w-6xl px-5 pt-14">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        {stats.map(([n, label], i) => (
+          <Reveal key={label} delay={i * 90}>
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-center">
+              <div className="font-display text-4xl font-bold text-gradient">{n}</div>
+              <div className="mt-1 text-xs font-semibold tracking-wide text-white/60 uppercase">
+                {label}
+              </div>
+            </div>
+          </Reveal>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -216,26 +307,63 @@ function Pipeline() {
   ];
   return (
     <section id="how" className="mx-auto max-w-6xl px-5 py-20">
-      <Eyebrow>How it works</Eyebrow>
-      <h2 className="animate-fade-up mt-3 max-w-2xl font-display text-3xl font-bold sm:text-4xl">
-        One clear chain from the plan to the proof.
-      </h2>
-      <div className="mt-10 flex flex-wrap items-center gap-x-2 gap-y-4">
-        {steps.map(([label, icon], i) => (
-          <React.Fragment key={label}>
-            <div
-              className={`animate-fade-up delay-${Math.min(i + 1, 7)} flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3`}>
-              <span className="text-xl">{icon}</span>
-              <span className="font-semibold">{label}</span>
-            </div>
-            {i < steps.length - 1 && (
-              <span className="animate-fade-in text-brand">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </span>
-            )}
-          </React.Fragment>
+      <Reveal>
+        <Eyebrow>How it works</Eyebrow>
+        <h2 className="text-display mt-3 max-w-2xl font-display font-bold">
+          One clear chain from the plan to the proof.
+        </h2>
+      </Reveal>
+      <Reveal delay={120}>
+        <div className="mt-10 flex flex-wrap items-center gap-x-2 gap-y-4">
+          {steps.map(([label, icon], i) => (
+            <React.Fragment key={label}>
+              <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 transition duration-300 hover:border-brand/40 hover:bg-white/10">
+                <span className="text-xl">{icon}</span>
+                <span className="font-semibold">{label}</span>
+              </div>
+              {i < steps.length - 1 && (
+                <span className="text-brand">
+                  <Arrow />
+                </span>
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+      </Reveal>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------- product screenshots */
+function Screens() {
+  const shots = [
+    [asset('demo-assets/screens/floor-plan.jpg'), 'Plan-first floor view', 'md:rotate-y-12 md:rotate-1 md:hover:rotate-y-0 md:hover:rotate-0'],
+    [asset('demo-assets/screens/site-control.jpg'), 'Foreman site control', 'z-10 md:scale-105'],
+    [asset('demo-assets/screens/job-card.jpg'), 'Worker job card', 'md:-rotate-y-12 md:-rotate-1 md:hover:rotate-y-0 md:hover:rotate-0'],
+  ];
+  return (
+    <section id="screens" className="relative mx-auto max-w-6xl px-5 py-20">
+      <Reveal className="text-center">
+        <Eyebrow center>The product</Eyebrow>
+        <h2 className="text-display mx-auto mt-3 max-w-xl font-display font-bold">
+          Real screens. Real data. Zero mockups.
+        </h2>
+      </Reveal>
+      <div className="persp mt-12 grid gap-6 md:grid-cols-3">
+        {shots.map(([src, label, pose], i) => (
+          <Reveal key={label} delay={i * 130}>
+            <figure
+              className={`group overflow-hidden rounded-3xl border border-white/15 bg-ink-2 shadow-[var(--shadow-lift)] transition duration-500 ${pose}`}>
+              <img
+                src={src}
+                alt={label}
+                className="w-full transition duration-500 group-hover:scale-[1.02]"
+              />
+              <figcaption className="border-t border-white/10 px-4 py-3 text-sm font-semibold text-white/80">
+                {label}
+              </figcaption>
+            </figure>
+          </Reveal>
         ))}
       </div>
     </section>
@@ -254,22 +382,24 @@ function Features() {
   ];
   return (
     <section id="features" className="mx-auto max-w-6xl px-5 py-20">
-      <Eyebrow>Features</Eyebrow>
-      <h2 className="animate-fade-up mt-3 max-w-2xl font-display text-3xl font-bold sm:text-4xl">
-        Built like a tool you'd actually use on site.
-      </h2>
+      <Reveal>
+        <Eyebrow>Features</Eyebrow>
+        <h2 className="text-display mt-3 max-w-2xl font-display font-bold">
+          Built like a tool you'd actually use on site.
+        </h2>
+      </Reveal>
       <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {features.map(([title, desc, Icon], i) => (
-          <div
-            key={title}
-            className={`group animate-fade-up delay-${Math.min(i + 1, 7)} relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-6 transition duration-300 hover:-translate-y-1.5 hover:border-brand/40`}>
-            <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-brand/15 text-brand transition group-hover:bg-brand group-hover:text-brand-fg">
-              <Icon />
+          <Reveal key={title} delay={(i % 3) * 110}>
+            <div className="group relative h-full overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-b from-white/[0.06] to-white/[0.02] p-6 transition duration-300 hover:-translate-y-1.5 hover:border-brand/40">
+              <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-brand/15 text-brand transition group-hover:bg-brand group-hover:text-brand-fg">
+                <Icon />
+              </div>
+              <h3 className="font-display text-lg font-bold">{title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-white/65">{desc}</p>
+              <div className="mt-4 h-px w-0 bg-brand transition-all duration-300 group-hover:w-full" />
             </div>
-            <h3 className="font-display text-lg font-bold">{title}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-white/65">{desc}</p>
-            <div className="mt-4 h-px w-0 bg-brand transition-all duration-300 group-hover:w-full" />
-          </div>
+          </Reveal>
         ))}
       </div>
     </section>
@@ -285,29 +415,37 @@ function Personas({onLaunchDemo}) {
   ];
   return (
     <section id="teams" className="mx-auto max-w-6xl px-5 py-20">
-      <Eyebrow>For everyone on site</Eyebrow>
-      <h2 className="animate-fade-up mt-3 max-w-2xl font-display text-3xl font-bold sm:text-4xl">
-        One platform, every role.
-      </h2>
+      <Reveal>
+        <Eyebrow>For everyone on site</Eyebrow>
+        <h2 className="text-display mt-3 max-w-2xl font-display font-bold">
+          One platform, every role.
+        </h2>
+      </Reveal>
       <div className="mt-10 grid gap-5 md:grid-cols-3">
         {people.map(([role, tag, desc, img, fit], i) => (
-          <div
-            key={role}
-            className={`group animate-fade-up delay-${i + 1} overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03]`}>
-            <div className="h-44 overflow-hidden bg-ink-2">
-              <img src={img} alt={role} className={`h-full w-full ${fit} transition duration-500 group-hover:scale-105`} />
+          <Reveal key={role} delay={i * 120}>
+            <div className="group h-full overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03] transition duration-300 hover:border-white/25">
+              <div className="h-44 overflow-hidden bg-ink-2">
+                <img
+                  src={img}
+                  alt={role}
+                  className={`h-full w-full ${fit} transition duration-500 group-hover:scale-105`}
+                />
+              </div>
+              <div className="p-6">
+                <div className="text-xs font-semibold tracking-wide text-brand uppercase">{role}</div>
+                <h3 className="mt-1 font-display text-xl font-bold">{tag}</h3>
+                <p className="mt-2 text-sm text-white/65">{desc}</p>
+              </div>
             </div>
-            <div className="p-6">
-              <div className="text-xs font-semibold tracking-wide text-brand uppercase">{role}</div>
-              <h3 className="mt-1 font-display text-xl font-bold">{tag}</h3>
-              <p className="mt-2 text-sm text-white/65">{desc}</p>
-            </div>
-          </div>
+          </Reveal>
         ))}
       </div>
-      <div className="mt-10 text-center">
-        <Accent onClick={onLaunchDemo}>See all three views in the demo</Accent>
-      </div>
+      <Reveal delay={200}>
+        <div className="mt-10 text-center">
+          <Accent onClick={onLaunchDemo}>See all three views in the demo</Accent>
+        </div>
+      </Reveal>
     </section>
   );
 }
@@ -316,20 +454,23 @@ function Personas({onLaunchDemo}) {
 function CTA({onSignIn, onLaunchDemo}) {
   return (
     <section className="mx-auto max-w-6xl px-5 pb-20">
-      <div className="relative overflow-hidden rounded-[2rem] border border-brand/30 bg-gradient-to-br from-brand/25 via-ink-2 to-ink-2 p-10 text-center animate-gradient sm:p-16">
-        <div className="pointer-events-none absolute -top-20 left-1/2 size-80 -translate-x-1/2 rounded-full bg-brand/30 blur-3xl" />
-        <h2 className="relative font-display text-3xl font-bold sm:text-5xl">
-          See a live construction site in 30 seconds.
-        </h2>
-        <p className="relative mx-auto mt-4 max-w-lg text-white/70">
-          No sign-up needed for the demo. Or create an account and start your own
-          project.
-        </p>
-        <div className="relative mt-8 flex flex-wrap justify-center gap-3">
-          <Accent onClick={onLaunchDemo}>Launch live demo</Accent>
-          <Ghost onClick={onSignIn}>Create an account</Ghost>
+      <Reveal>
+        <div className="noise relative overflow-hidden rounded-[2rem] border border-brand/30 bg-gradient-to-br from-brand/25 via-ink-2 to-ink-2 p-10 text-center animate-gradient sm:p-16">
+          <div className="pointer-events-none absolute -top-20 left-1/2 size-80 -translate-x-1/2 rounded-full bg-brand/30 blur-3xl" />
+          <h2 className="relative font-display text-3xl font-bold sm:text-5xl">
+            See a live construction site
+            <br className="hidden sm:block" /> in 30 seconds.
+          </h2>
+          <p className="relative mx-auto mt-4 max-w-lg text-white/70">
+            No sign-up needed for the demo. Or create an account and start your
+            own project.
+          </p>
+          <div className="relative mt-8 flex flex-wrap justify-center gap-3">
+            <Accent onClick={onLaunchDemo}>Launch live demo</Accent>
+            <Ghost onClick={onSignIn}>Create an account</Ghost>
+          </div>
         </div>
-      </div>
+      </Reveal>
     </section>
   );
 }
@@ -348,12 +489,21 @@ function Footer() {
 }
 
 /* ------------------------------------------------------------------ shared */
-function Eyebrow({children}) {
+function Eyebrow({children, center}) {
   return (
-    <span className="animate-fade-in inline-flex items-center gap-2 text-sm font-semibold tracking-widest text-brand uppercase">
+    <span className={`inline-flex items-center gap-2 text-sm font-semibold tracking-widest text-brand uppercase ${center ? 'justify-center' : ''}`}>
       <span className="h-px w-8 bg-brand" />
       {children}
+      {center && <span className="h-px w-8 bg-brand" />}
     </span>
+  );
+}
+
+function Arrow() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 

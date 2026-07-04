@@ -97,16 +97,25 @@ for (const s of screens) {
   });
   await page.setContent(doc(s.html), {waitUntil: 'domcontentloaded'});
   // Wait for every <img> to finish loading/decoding so assets aren't blank.
+  // Wait for fonts + images, but never hang: every wait races a timeout
+  // (lazy images / a stalled font request must not block the capture).
   await page.evaluate(async () => {
+    const upTo = (p, ms) =>
+      Promise.race([p, new Promise(r => setTimeout(r, ms))]);
     if (document.fonts && document.fonts.ready) {
-      await document.fonts.ready.catch(() => {});
+      await upTo(document.fonts.ready.catch(() => {}), 4000);
     }
-    await Promise.all(
-      [...document.images].map(img =>
-        img.complete ? null : img.decode().catch(() => {})
-      )
+    await upTo(
+      Promise.all(
+        [...document.images].map(img =>
+          img.complete ? null : img.decode().catch(() => {})
+        )
+      ),
+      5000
     );
   });
+  // Let entrance animations finish so captures show the settled layout.
+  await new Promise(r => setTimeout(r, 1800));
   const path = join(outDir, `bv-${s.slug}.png`);
   await page.screenshot({path, fullPage: true});
   console.log('shot', path);
