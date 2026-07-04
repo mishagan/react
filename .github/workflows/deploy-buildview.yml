@@ -23,10 +23,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Enable + configure GitHub Pages
+      # Tries to enable Pages; creating the site needs repo-admin, which the
+      # workflow token may lack — in that case enable it once by hand
+      # (Settings → Pages → Source: GitHub Actions) and this step passes
+      # from then on.
+      - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
         with:
           enablement: true
+        continue-on-error: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
